@@ -1,0 +1,57 @@
+name: Water Supply Tracker CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  frontend:
+    name: React Frontend Build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: water-supply-complaint-tracker
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: water-supply-complaint-tracker/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Frontend
+        run: npm run build
+
+  backend:
+    name: Spring Boot Backend Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: water-supply-complaint-tracker-backend
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: water-supply-complaint-tracker-backend/pom.xml
+
+      - name: Test Backend
+        run: mvn -B test
