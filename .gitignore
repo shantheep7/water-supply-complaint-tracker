@@ -1,0 +1,33 @@
+# Environment variables and passwords
+.env
+.env.*
+!.env.example
+
+# Frontend
+node_modules/
+dist/
+.vite/
+
+# Backend
+target/
+*.class
+.mvn/wrapper/maven-wrapper.jar
+
+# Mac
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+crash.log
+
+# Logs
+*.log
