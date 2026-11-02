@@ -1,0 +1,103 @@
+#!/bin/bash
+# -----------------------------------------------------------------------------
+# EC2 first-boot script (rendered by Terraform's templatefile()).
+# Prepares the host only - it does NOT start the application and contains
+# NO secrets. Output is logged to /var/log/water-supply-setup.log.
+# Note: a double dollar sign below is Terraform's escape; it becomes a single
+# dollar sign on the server, so Docker Compose reads its own variables.
+# -----------------------------------------------------------------------------
+set -euo pipefail
+exec > >(tee -a /var/log/water-supply-setup.log) 2>&1
+echo "=== Water Supply Tracker host setup started: $(date -u) ==="
+
+# 1. Security updates and Docker (from the Amazon Linux 2023 repository)
+dnf -y upgrade --security
+dnf -y install docker
+systemctl enable --now docker
+
+# 2. Docker Compose v2 plugin, pinned version, checksum verified
+COMPOSE_DIR=/usr/local/lib/docker/cli-plugins
+TMP_DIR=$(mktemp -d)
+cd "$TMP_DIR"
+curl -fsSLO "https://github.com/docker/compose/releases/download/${docker_compose_version}/docker-compose-linux-x86_64"
+curl -fsSLO "https://github.com/docker/compose/releases/download/${docker_compose_version}/docker-compose-linux-x86_64.sha256"
+sha256sum -c docker-compose-linux-x86_64.sha256
+mkdir -p "$COMPOSE_DIR"
+install -m 0755 docker-compose-linux-x86_64 "$COMPOSE_DIR/docker-compose"
+cd / && rm -rf "$TMP_DIR"
+docker compose version
+
+# 3. 2 GiB swap file: a safety net so MySQL + Java don't run out of memory
+if [ ! -f /swapfile ]; then
+  fallocate -l 2G /swapfile
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+fi
+
+# 4. Application directory with the production Compose file (no secrets)
+APP_DIR=/opt/water-supply
+mkdir -p "$APP_DIR"
+chmod 700 "$APP_DIR"
+
+cat > "$APP_DIR/docker-compose.yml" <<'COMPOSE'
+# Production Compose file: uses the published GHCR images (no local builds).
+# Secrets come from /opt/water-supply/.env, which YOU create (see README).
+# Only the frontend publishes a port; MySQL and Spring Boot stay internal.
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: water_supply_tracker
+      MYSQL_USER: wst_user
+      MYSQL_PASSWORD: $${MYSQL_APP_PASSWORD:?Set MYSQL_APP_PASSWORD in .env}
+      MYSQL_ROOT_PASSWORD: $${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    mem_limit: 640m
+
+  backend:
+    image: ${backend_image}
+    restart: unless-stopped
+    environment:
+      DB_URL: jdbc:mysql://db:3306/water_supply_tracker?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      DB_USERNAME: wst_user
+      DB_PASSWORD: $${MYSQL_APP_PASSWORD:?Set MYSQL_APP_PASSWORD in .env}
+      # app.seed-sample-data - demo complaints are off unless you enable them in .env
+      APP_SEEDSAMPLEDATA: $${APP_SEED_SAMPLE_DATA:-false}
+      JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+    depends_on:
+      db:
+        condition: service_healthy
+    mem_limit: 768m
+
+  frontend:
+    image: ${frontend_image}
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    mem_limit: 128m
+
+volumes:
+  mysql_data:
+COMPOSE
+
+cat > "$APP_DIR/.env.example" <<'ENVFILE'
+# Copy to .env and replace the values:  sudo cp .env.example .env && sudo chmod 600 .env
+# Generate strong passwords with:       openssl rand -base64 24 | tr -d '/+='
+MYSQL_APP_PASSWORD=change-me
+MYSQL_ROOT_PASSWORD=change-me-too
+# true = load the 12 demo complaints into an empty database
+APP_SEED_SAMPLE_DATA=false
+ENVFILE
+
+echo "=== Host setup finished: $(date -u). App NOT started - see terraform/README.md ==="
