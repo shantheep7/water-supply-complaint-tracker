@@ -4,12 +4,12 @@
 # -----------------------------------------------------------------------------
 
 variable "aws_region" {
-  description = "AWS region to deploy into, e.g. ap-south-1 (Mumbai). Must be chosen explicitly."
+  description = "AWS region to deploy into, e.g. ap-southeast-2 (Sydney). Must be chosen explicitly."
   type        = string
 
   validation {
     condition     = can(regex("^[a-z]{2}(-[a-z]+)+-[0-9]$", var.aws_region))
-    error_message = "aws_region must look like a region code, e.g. ap-south-1 or us-east-1."
+    error_message = "aws_region must look like a region code, e.g. ap-southeast-2 or us-east-1."
   }
 }
 
@@ -97,4 +97,31 @@ variable "docker_compose_version" {
   description = "Docker Compose v2 plugin release installed on the instance (downloaded from GitHub and checksum-verified)."
   type        = string
   default     = "v2.29.7"
+}
+
+# -----------------------------------------------------------------------------
+# Monitoring (monitoring.tf)
+# -----------------------------------------------------------------------------
+
+variable "dashboard_name" {
+  description = "Existing CloudWatch dashboard to manage (imported, not duplicated)."
+  type        = string
+  default     = "WaterSupply-Monitoring-Dashboard"
+}
+
+variable "log_retention_days" {
+  description = "How many days CloudWatch keeps application and deployment logs."
+  type        = number
+  default     = 7
+
+  validation {
+    condition     = contains([1, 3, 5, 7, 14, 30, 60, 90], var.log_retention_days)
+    error_message = "log_retention_days must be one of 1, 3, 5, 7, 14, 30, 60 or 90."
+  }
+}
+
+variable "enable_host_metrics" {
+  description = "Send memory and disk usage from the CloudWatch Agent. Adds 2 custom metrics (about US$0.60/month), so it is off by default."
+  type        = bool
+  default     = false
 }

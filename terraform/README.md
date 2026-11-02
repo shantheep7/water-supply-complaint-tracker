@@ -66,17 +66,19 @@ Deliberately **not** created, either to save money or to keep things simple:
 
 These are approximate on-demand list prices for Linux, running 24×7 (730 hours). Prices change; check the [AWS Pricing Calculator](https://calculator.aws/) for your region before applying.
 
-| Item | ap-south-1 (Mumbai) | us-east-1 (N. Virginia) |
-|---|---|---|
-| EC2 `t3.small` (~$0.0224 / ~$0.0208 per hour) | ~US$16.40 | ~US$15.20 |
-| EBS gp3 20 GiB (~$0.0912 / ~$0.08 per GiB-month) | ~US$1.80 | ~US$1.60 |
-| Public IPv4 address ($0.005 per hour) | ~US$3.65 | ~US$3.65 |
-| Data transfer out (first 100 GB/month free across your account) | ~US$0 | ~US$0 |
-| VPC, subnet, IGW, security group, IAM, Session Manager | Free | Free |
-| **Total, running all month** | **≈ US$22/month** | **≈ US$20.5/month** |
+This project deploys to **ap-southeast-2 (Sydney)**, the only region this AWS account's organization allows.
+
+| Item | ap-southeast-2 (Sydney) |
+|---|---|
+| EC2 `t3.small` (~$0.0264 per hour) | ~US$19.30 |
+| EBS gp3 20 GiB (~$0.096 per GiB-month) | ~US$1.90 |
+| Public IPv4 address ($0.005 per hour) | ~US$3.65 |
+| Data transfer out (first 100 GB/month free across your account) | ~US$0 |
+| VPC, subnet, IGW, security group, IAM, Session Manager | Free |
+| **Total, running all month** | **≈ US$25/month (≈ US$0.83/day)** |
 
 **How to keep it low:**
-- **Stop the instance when you're not demoing it.** While stopped you pay only for EBS (~US$1.80/month). The automatically assigned public IP is released, so there's no IPv4 charge, but you get a **new IP** when you start it again.
+- **Stop the instance when you're not demoing it.** While stopped you pay only for EBS (~US$1.90/month). The automatically assigned public IP is released, so there's no IPv4 charge, but you get a **new IP** when you start it again.
 - **`t3.micro`** (1 GiB RAM) is roughly half the price. It might run with the 2 GiB swap, but it will be slow; `t3.small` is the recommended minimum.
 - **Free Tier:** what's free depends on when your AWS account was created. Accounts created after 15 July 2025 get credits instead of the old 750 hours of `t2/t3.micro`. Check *Billing → Free Tier* in the console; don't assume this setup is free.
 - **Budget alert:** before applying, create one in the console (*Billing → Budgets*, e.g. US$10/month with email alerts). It isn't created here, because these files only touch the project's own resources.
@@ -174,6 +176,51 @@ terraform destroy
 ### Later: remote state
 
 `terraform.tfstate` stays on your Mac and is git-ignored. It holds resource IDs and IP addresses, not passwords, but treat it as private. For team use, move it to an S3 bucket with versioning and encryption, using a `backend "s3"` block with `use_lockfile = true` (costs cents per month).
+
+---
+
+## Monitoring (Amazon CloudWatch)
+
+`monitoring.tf` adds monitoring without touching the instance, its security group or the database.
+
+| What | How | Where to look |
+|---|---|---|
+| CPU, network, status checks | Free EC2 metrics (5-minute basic monitoring) | Dashboard `WaterSupply-Monitoring-Dashboard` |
+| `WaterSupply-HighCPU` | CPU average > 80% for 2 of 2 five-minute periods | CloudWatch → Alarms |
+| `WaterSupply-EC2-Health` | `StatusCheckFailed` (instance or system check) > 0 in a 5-minute period | CloudWatch → Alarms |
+| Backend and frontend logs | Docker `awslogs` log driver (`docker-compose.override.yml` on the server) | `/water-supply-tracker/dev/backend`, `/water-supply-tracker/dev/frontend` |
+| Deployment logs | systemd writes the deploy timer's output to `/var/log/water-supply/deploy.log`; the CloudWatch Agent ships it | `/water-supply-tracker/dev/deployment` |
+| Backend errors | Metric filter counts `ERROR` lines → `WaterSupply/Application BackendErrors` | Dashboard |
+
+Key decisions:
+
+- **No notifications.** The alarms change state on the dashboard but send no e-mail or SNS message. Add an SNS topic and `alarm_actions` when you want them.
+- **A stopped instance is "OK", not "ALARM".** It sends no data, and `treat_missing_data = "notBreaching"` keeps the alarms quiet.
+- **Logs are kept 7 days** (`log_retention_days`).
+- **Private data is masked.** A data protection policy masks IP addresses, e-mail addresses and AWS keys in the container logs. Passwords never reach the logs: Spring Boot doesn't print its settings, `show-sql` is off, and only container output (stdout/stderr) is sent, never the environment variables.
+- **Routine lines are skipped.** The deployment log leaves out the every-minute "No new images found" lines and image-pull progress.
+- **MySQL logs stay on the server.** Sending them to CloudWatch would need the database container to be recreated.
+- **The dashboard was imported.** It was first made by hand in the console, so the `import` block adopts it instead of creating a duplicate. Its original widgets are saved in `backup/`. The DiskRead/DiskWrite graphs were removed because EC2 reports them only for instance-store disks, so they were always empty on this instance.
+- **Memory and disk metrics are optional.** They need the CloudWatch Agent to send 2 custom metrics (about US$0.60/month). Set `enable_host_metrics = true` in `terraform.tfvars` to turn them on; the dashboard then gains a graph for them.
+
+Extra cost: about **US$0.50/month at most**.
+- Alarms (10 free), dashboards (3 free), the agent and the standard Parameter Store parameter cost nothing.
+- Log ingestion and storage cost a few cents for a few MB per month.
+- The `BackendErrors` metric is billed only in hours when errors are logged.
+
+### Turning it on
+
+```bash
+# 1. On your Mac: create the CloudWatch resources (review the plan first)
+terraform -chdir=terraform plan -out=tfplan
+terraform -chdir=terraform apply tfplan
+
+# 2. On the server (Session Manager shell): copy scripts/setup-cloudwatch-logging.sh there, then
+sudo bash setup-cloudwatch-logging.sh                # container logs start at the next deployment
+sudo bash setup-cloudwatch-logging.sh --restart-now  # or now: backend + frontend restart (~30 s)
+```
+
+The script is safe to run again. It installs the agent with `dnf`, adds a systemd drop-in and a logrotate rule for the deployment log, and writes `docker-compose.override.yml`. It does not touch MySQL, Docker volumes or `.env`.
 
 ---
 

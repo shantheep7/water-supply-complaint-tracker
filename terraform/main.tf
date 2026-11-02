@@ -143,7 +143,8 @@ resource "aws_vpc_security_group_egress_rule" "http" {
 # -----------------------------------------------------------------------------
 # IAM: lets the instance register with Systems Manager so you can open a
 # Session Manager shell. Least privilege - only the five actions Session
-# Manager needs (no S3, no Parameter Store, no Run Command).
+# Manager needs (no S3, no Run Command). CloudWatch Logs permissions are a
+# separate policy in monitoring.tf.
 # -----------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "ec2_assume_role" {
@@ -194,7 +195,8 @@ resource "aws_iam_instance_profile" "ec2" {
 # -----------------------------------------------------------------------------
 
 resource "aws_instance" "app" {
-  ami                    = data.aws_ssm_parameter.al2023_x86_64.value
+  # insecure_value: the AMI ID is public, so it doesn't need Terraform's "sensitive" masking
+  ami                    = data.aws_ssm_parameter.al2023_x86_64.insecure_value
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.app.id]

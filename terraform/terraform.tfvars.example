@@ -4,8 +4,9 @@
 # terraform.tfvars is git-ignored. Never put passwords, tokens or AWS keys in it.
 # -----------------------------------------------------------------------------
 
-# Required: the AWS region to deploy into (ap-south-1 = Mumbai)
-aws_region = "ap-south-1"
+# Required: the AWS region to deploy into (ap-southeast-2 = Sydney).
+# This account's AWS Organization only allows ap-southeast-2.
+aws_region = "ap-southeast-2"
 
 # Required: who may open the website. Find your public IP with:
 #   curl -s https://checkip.amazonaws.com

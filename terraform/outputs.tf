@@ -36,3 +36,18 @@ output "security_group_id" {
   description = "Security group attached to the instance."
   value       = aws_security_group.app.id
 }
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard in the AWS console."
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards/dashboard/${aws_cloudwatch_dashboard.main.dashboard_name}"
+}
+
+output "log_groups" {
+  description = "CloudWatch log groups for the backend, frontend and deployment logs."
+  value       = { for key, group in aws_cloudwatch_log_group.app : key => group.name }
+}
+
+output "cloudwatch_agent_config_parameter" {
+  description = "Parameter Store name holding the CloudWatch Agent configuration."
+  value       = aws_ssm_parameter.cloudwatch_agent_config.name
+}
